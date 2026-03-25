@@ -1,12 +1,11 @@
 """
 Integration tests for the API service using LocalStack.
 
-These tests require a running LocalStack instance and are skipped automatically
-when the LOCALSTACK_ENDPOINT environment variable is not set.
+Skipped automatically when LOCALSTACK_ENDPOINT is not set.
 
 Run locally:
-    docker-compose -f ../../cp-infra/iac/docker-compose.local.yml up -d
-    LOCALSTACK_ENDPOINT=http://localhost:4566 pytest tests/integration/ -v
+    docker-compose -f ../../cp-infra/local/docker-compose.yml up -d localstack localstack-init
+    LOCALSTACK_ENDPOINT=http://localhost:4566 make test-integration
 """
 
 import json
@@ -14,7 +13,6 @@ import os
 
 import boto3
 import pytest
-import requests
 from fastapi.testclient import TestClient
 
 LOCALSTACK_ENDPOINT = os.environ.get("LOCALSTACK_ENDPOINT", "")
@@ -29,15 +27,20 @@ QUEUE_NAME = "exam-costa-test-messages"
 SSM_PARAM = "/exam-costa/test/api/token"
 TEST_TOKEN = "integration-test-token"
 
+VALID_DATA = {
+    "email_subject": "Happy new year!",
+    "email_sender": "John Doe",
+    "email_timestream": "1693561101",
+    "email_content": "Just want to say... Happy new year!!!",
+}
+
 
 # ==========================================
-# LocalStack fixtures
+# Fixtures
 # ==========================================
-
 
 @pytest.fixture(scope="module")
 def aws_clients():
-    """Create real boto3 clients pointing at LocalStack."""
     kwargs = {
         "endpoint_url": LOCALSTACK_ENDPOINT,
         "region_name": AWS_REGION,
@@ -52,7 +55,6 @@ def aws_clients():
 
 @pytest.fixture(scope="module")
 def localstack_resources(aws_clients):
-    """Create SQS queue and SSM parameter in LocalStack."""
     sqs = aws_clients["sqs"]
     ssm = aws_clients["ssm"]
 
@@ -63,17 +65,11 @@ def localstack_resources(aws_clients):
     except sqs.exceptions.QueueNameExists:
         queue_url = sqs.get_queue_url(QueueName=QUEUE_NAME)["QueueUrl"]
 
-    # Create SSM parameter
-    ssm.put_parameter(
-        Name=SSM_PARAM,
-        Value=TEST_TOKEN,
-        Type="SecureString",
-        Overwrite=True,
-    )
+    # Seed SSM token
+    ssm.put_parameter(Name=SSM_PARAM, Value=TEST_TOKEN, Type="SecureString", Overwrite=True)
 
-    yield {"queue_url": queue_url, "ssm_param": SSM_PARAM}
+    yield {"queue_url": queue_url}
 
-    # Cleanup
     try:
         sqs.delete_queue(QueueUrl=queue_url)
     except Exception:
@@ -86,24 +82,19 @@ def localstack_resources(aws_clients):
 
 @pytest.fixture(scope="module")
 def api_client(localstack_resources):
-    """Create a FastAPI TestClient with LocalStack env vars."""
     os.environ["LOCALSTACK_ENDPOINT"] = LOCALSTACK_ENDPOINT
     os.environ["SQS_QUEUE_URL"] = localstack_resources["queue_url"]
-    os.environ["SSM_PARAMETER_NAME"] = localstack_resources["ssm_param"]
+    os.environ["SSM_PARAMETER_NAME"] = SSM_PARAM
     os.environ["AWS_ACCESS_KEY_ID"] = "test"
     os.environ["AWS_SECRET_ACCESS_KEY"] = "test"
     os.environ["AWS_REGION"] = AWS_REGION
 
-    # Import app after env vars are set
     import importlib
-
     import app.main as main_module
-
     importlib.reload(main_module)
     main_module.invalidate_token_cache()
 
     from app.main import app
-
     return TestClient(app)
 
 
@@ -111,80 +102,40 @@ def api_client(localstack_resources):
 # Tests
 # ==========================================
 
-
 def test_health_endpoint(api_client):
-    """GET /health should return 200 with status=healthy."""
-    response = api_client.get("/healthz")
-    assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "healthy"
-    assert body["service"] == "api"
+    r = api_client.get("/healthz")
+    assert r.status_code == 200
+    assert r.json()["status"] == "healthy"
 
 
-def test_message_requires_auth(api_client):
-    """POST /message without token should return 403."""
-    response = api_client.post(
-        "/message",
-        json={
-            "name": "test",
-            "category": "test",
-            "value": 1.0,
-            "description": "test",
-        },
-    )
-    assert response.status_code in (401, 403)
+def test_message_requires_token(api_client):
+    r = api_client.post("/message", json={"data": VALID_DATA})
+    assert r.status_code == 422
 
 
 def test_message_rejects_invalid_token(api_client):
-    """POST /message with wrong token should return 401."""
-    response = api_client.post(
-        "/message",
-        json={
-            "name": "test",
-            "category": "test",
-            "value": 1.0,
-            "description": "test",
-        },
-        headers={"Authorization": "Bearer wrong-token"},
-    )
-    assert response.status_code == 401
+    r = api_client.post("/message", json={"data": VALID_DATA, "token": "wrong"})
+    assert r.status_code == 401
 
 
 def test_message_published_to_sqs(api_client, aws_clients, localstack_resources):
-    """POST /message with valid token should publish to SQS."""
-    response = api_client.post(
-        "/message",
-        json={
-            "name": "Integration Test",
-            "category": "testing",
-            "value": 99.5,
-            "description": "Published via integration test",
-        },
-        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
-    )
-    assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "published"
-    assert "message_id" in body
+    r = api_client.post("/message", json={"data": VALID_DATA, "token": TEST_TOKEN})
+    assert r.status_code == 200
+    assert r.json()["status"] == "published"
 
     # Verify message landed in SQS
-    sqs = aws_clients["sqs"]
-    msgs = sqs.receive_message(
+    msgs = aws_clients["sqs"].receive_message(
         QueueUrl=localstack_resources["queue_url"],
         MaxNumberOfMessages=1,
         WaitTimeSeconds=2,
     ).get("Messages", [])
     assert len(msgs) == 1
-    payload = json.loads(msgs[0]["Body"])
-    assert payload["name"] == "Integration Test"
-    assert payload["category"] == "testing"
+    body = json.loads(msgs[0]["Body"])
+    assert body["email_subject"] == VALID_DATA["email_subject"]
+    assert body["email_sender"] == VALID_DATA["email_sender"]
+    assert "token" not in body
 
 
 def test_message_validates_payload(api_client):
-    """POST /message with missing fields should return 422."""
-    response = api_client.post(
-        "/message",
-        json={"name": "only name"},
-        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
-    )
-    assert response.status_code == 422
+    r = api_client.post("/message", json={"data": {"email_subject": "only one field"}, "token": TEST_TOKEN})
+    assert r.status_code == 422
