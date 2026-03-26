@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 # Configuration
 # ==========================================
 AWS_REGION = os.getenv("AWS_REGION", "us-east-2")
+APP_VERSION = os.getenv("APP_VERSION", "unknown")
 SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL", "")
 SSM_PARAMETER_NAME = os.getenv("SSM_PARAMETER_NAME", "/devops-exam-costa/api/token")
 
@@ -148,7 +149,7 @@ class MessageResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     service: str = "api"
-    version: str = "1.0.0"
+    version: str = APP_VERSION
 
 
 # ==========================================
@@ -157,7 +158,7 @@ class HealthResponse(BaseModel):
 app = FastAPI(
     title="DevOps Exam API",
     description="Accepts email messages, validates token, publishes data to SQS.",
-    version="1.0.0",
+    version=APP_VERSION,
 )
 
 
