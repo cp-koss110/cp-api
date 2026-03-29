@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 AWS_REGION = os.getenv("AWS_REGION", "us-east-2")
 APP_VERSION = os.getenv("APP_VERSION", "unknown")
 SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL", "")
-SSM_PARAMETER_NAME = os.getenv("SSM_PARAMETER_NAME", "/devops-exam-costa/api/token")
+SSM_PARAMETER_NAME = os.getenv("SSM_PARAMETER_NAME", "/exam-costa/staging/api/token")
 
 # LocalStack support
 LOCALSTACK_ENDPOINT = os.getenv("LOCALSTACK_ENDPOINT", "")
@@ -176,18 +176,21 @@ class EmailData(BaseModel):
 
 
 class MessageRequest(BaseModel):
-    """
-    Exam payload format:
-    {
-        "data": {
-            "email_subject": "...",
-            "email_sender": "...",
-            "email_timestream": "1693561101",
-            "email_content": "..."
-        },
-        "token": "<secret>"
+    """Exam payload — email data plus the auth token."""
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "data": {
+                    "email_subject": "Happy new year!",
+                    "email_sender": "John Doe",
+                    "email_timestream": "1693561101",
+                    "email_content": "Just want to say... Happy new year!!!",
+                },
+                "token": "<secret>",
+            }
+        }
     }
-    """
 
     data: EmailData
     token: str = Field(
@@ -196,16 +199,16 @@ class MessageRequest(BaseModel):
 
 
 class MessageResponse(BaseModel):
-    message_id: str
-    status: str = "published"
-    queue_url: str
-    timestamp: str
+    message_id: str = Field(..., description="UUID assigned to this message")
+    status: str = Field("published", description="Always 'published' on success")
+    queue_url: str = Field(..., description="SQS queue URL the message was sent to")
+    timestamp: str = Field(..., description="ISO-8601 UTC timestamp of publication")
 
 
 class HealthResponse(BaseModel):
-    status: str
-    service: str = "api"
-    version: str = APP_VERSION
+    status: str = Field(..., description="Always 'healthy' when the service is up")
+    service: str = Field("api", description="Service name identifier")
+    version: str = Field(APP_VERSION, description="Deployed application version")
 
 
 # ==========================================
@@ -226,9 +229,37 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="DevOps Exam API",
-    description="Accepts email messages, validates token, publishes data to SQS.",
+    description="""
+A lightweight microservice that sits behind an AWS Application Load Balancer.
+It validates an authentication token against **AWS SSM Parameter Store**, then
+publishes the email payload to an **AWS SQS** queue for downstream processing.
+
+## Authentication
+
+Pass the secret token in the request body as `token`.
+It is compared against the value stored in SSM Parameter Store
+(`SSM_PARAMETER_NAME` env var, pattern `/{project}/{env}/api/token`).
+
+## Infrastructure
+
+| Component | Service |
+|-----------|---------|
+| Token storage | AWS SSM Parameter Store |
+| Message queue | AWS SQS |
+| Metrics | Prometheus (`/metrics`) |
+""",
     version=APP_VERSION,
     lifespan=lifespan,
+    openapi_tags=[
+        {
+            "name": "Health",
+            "description": "Liveness probe used by the ALB target group. No auth required.",
+        },
+        {
+            "name": "Messages",
+            "description": "Publish validated email data to the SQS queue.",
+        },
+    ],
 )
 
 # Mount Prometheus metrics endpoint
@@ -261,27 +292,37 @@ async def prometheus_middleware(request: Request, call_next):
 # ==========================================
 # Endpoints
 # ==========================================
-@app.get("/healthz", response_model=HealthResponse, tags=["Health"])
+@app.get(
+    "/healthz",
+    response_model=HealthResponse,
+    tags=["Health"],
+    summary="Health check",
+)
 def health_check() -> HealthResponse:
-    """Health check — used by ALB target group."""
+    """Returns `healthy` when the service is running. Used by the ALB target group."""
     return HealthResponse(status="healthy")
 
 
-@app.post("/message", response_model=MessageResponse, tags=["Messages"])
+@app.post(
+    "/message",
+    response_model=MessageResponse,
+    tags=["Messages"],
+    summary="Publish an email message to SQS",
+    responses={
+        401: {"description": "Invalid or missing authentication token"},
+        503: {"description": "AWS SSM or SQS service unavailable"},
+    },
+)
 def publish_message(request: MessageRequest) -> MessageResponse:
     """
-    Validate token and publish email data to SQS.
+    Validates the `token` field against AWS SSM Parameter Store, then publishes
+    the email payload to the configured SQS queue.
 
-    Request body:
-        {
-            "data": {
-                "email_subject": "...",
-                "email_sender": "...",
-                "email_timestream": "1693561101",
-                "email_content": "..."
-            },
-            "token": "<secret>"
-        }
+    **Token validation**: the token is compared to the value stored at
+    `SSM_PARAMETER_NAME`. Returns `401` on mismatch, `503` if SSM is unreachable.
+
+    **SQS publishing**: the email fields (without the token) are sent as a JSON
+    message. Returns `503` if SQS is unreachable.
     """
     # 1. Validate token against SSM
     try:

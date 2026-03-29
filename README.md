@@ -24,6 +24,16 @@ flowchart LR
 
 ---
 
+## Swagger UI
+
+Interactive API docs available at [`/docs`](http://localhost:8000/docs) when running locally.
+
+![Swagger overview](docs/swagger-overview.png)
+
+![POST /message endpoint](docs/swagger-message.png)
+
+---
+
 ## Endpoints
 
 | Method | Path | Auth | Description |
@@ -153,6 +163,8 @@ make pre-commit-install
 make pre-commit-run
 ```
 
+![pre-commit-run output](docs/pre-commit-run.png)
+
 ---
 
 ## CI/CD
@@ -190,7 +202,7 @@ gh workflow run release.yml \
 |----------|---------|-------------|
 | `AWS_REGION` | `us-east-2` | AWS region |
 | `SQS_QUEUE_URL` | — | SQS queue URL |
-| `SSM_PARAMETER_NAME` | `/devops-exam-costa/api/token` | SSM path for API token |
+| `SSM_PARAMETER_NAME` | `/exam-costa/staging/api/token` | SSM path for API token — pattern `/{project}/{env}/api/token` |
 | `LOCALSTACK_ENDPOINT` | — | Set to use LocalStack instead of AWS |
 | `LOG_LEVEL` | `INFO` | Log level |
 | `APP_VERSION` | `unknown` | Injected at build time via `--build-arg VERSION` |
