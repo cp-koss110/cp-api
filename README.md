@@ -24,6 +24,16 @@ flowchart LR
 
 ---
 
+## Swagger UI
+
+Interactive API docs available at [`/docs`](http://localhost:8000/docs) when running locally.
+
+![Swagger overview](docs/swagger-overview.png)
+
+![POST /message endpoint](docs/swagger-message.png)
+
+---
+
 ## Endpoints
 
 | Method | Path | Auth | Description |
