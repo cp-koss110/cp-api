@@ -1,14 +1,14 @@
 # cp-api
 
-![CI](https://github.com/koss110/cp-api/actions/workflows/ci.yml/badge.svg)
-![Release](https://github.com/koss110/cp-api/actions/workflows/release.yml/badge.svg)
-![CodeQL](https://github.com/koss110/cp-api/actions/workflows/codeql.yml/badge.svg)
+![CI](https://github.com/cp-koss110/cp-api/actions/workflows/ci.yml/badge.svg)
+![Release](https://github.com/cp-koss110/cp-api/actions/workflows/release.yml/badge.svg)
+![CodeQL](https://github.com/cp-koss110/cp-api/actions/workflows/codeql.yml/badge.svg)
 ![Python](https://img.shields.io/badge/python-3.12-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688)
 
 REST API microservice — receives email messages over HTTP, validates a bearer token against AWS SSM Parameter Store, and publishes the payload to SQS.
 
-> Infrastructure, local stack, and CI/CD orchestration live in [`cp-infra`](https://github.com/koss110/cp-infra).
+> Infrastructure, local stack, and CI/CD orchestration live in [`cp-infra`](https://github.com/cp-koss110/cp-infra).
 
 ---
 
@@ -70,7 +70,7 @@ Interactive API docs available at [`/docs`](http://localhost:8000/docs) when run
 
 ## Local development
 
-The full local stack (LocalStack + cp-api + cp-worker) is managed from [`cp-infra`](https://github.com/koss110/cp-infra). Clone all three repos as siblings:
+The full local stack (LocalStack + cp-api + cp-worker) is managed from [`cp-infra`](https://github.com/cp-koss110/cp-infra). Clone all three repos as siblings:
 
 ```
 parent-dir/
